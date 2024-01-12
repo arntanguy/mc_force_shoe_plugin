@@ -36,8 +36,6 @@ void ForceShoePlugin::init(mc_control::MCGlobalController & controller, const mc
     mc_rtc::Configuration calib(calibFile_);
     LFUnload = calib("LFUnload");
     LBUnload = calib("LBUnload");
-    RFUnload = calib("RFUnload");
-    RBUnload = calib("RBUnload");
     mode_ = Mode::Acquire;
   }
 
@@ -52,6 +50,7 @@ void ForceShoePlugin::init(mc_control::MCGlobalController & controller, const mc
     doMtSettings();
     packet_.reset(new Packet((unsigned short)mtCount, cmt3_->isXm()));
     th_ = std::thread([this]() { dataThread(); });
+   
   }
   reset(controller);
 }
@@ -76,20 +75,54 @@ void ForceShoePlugin::reset(mc_control::MCGlobalController & controller)
                               {
                                 mode_ = Mode::Calibrate;
                               }
-                            }));
+                            })
+      
+                            
+                            );
+                
     ctl.datastore().make<sva::ForceVecd>("ForceShoePlugin::LFForce", sva::ForceVecd::Zero());
     ctl.datastore().make<sva::ForceVecd>("ForceShoePlugin::LBForce", sva::ForceVecd::Zero());
-    ctl.datastore().make<sva::ForceVecd>("ForceShoePlugin::RFForce", sva::ForceVecd::Zero());
-    ctl.datastore().make<sva::ForceVecd>("ForceShoePlugin::RBForce", sva::ForceVecd::Zero());
+    
+   
+   
 
     ctl.datastore().make_call("ForceShoePlugin::GetLFForce", [&ctl, this]()
                               { return ctl.datastore().get<sva::ForceVecd>("ForceShoePlugin::LFForce"); });
     ctl.datastore().make_call("ForceShoePlugin::GetLBForce", [&ctl, this]()
                               { return ctl.datastore().get<sva::ForceVecd>("ForceShoePlugin::LBForce"); });
-    ctl.datastore().make_call("ForceShoePlugin::GetRFForce", [&ctl, this]()
-                              { return ctl.datastore().get<sva::ForceVecd>("ForceShoePlugin::RFForce"); });
-    ctl.datastore().make_call("ForceShoePlugin::GetRBForce", [&ctl, this]()
-                              { return ctl.datastore().get<sva::ForceVecd>("ForceShoePlugin::RBForce"); });
+    // Add a new category for force vectors under "AtiDaq" plugin
+    ctl.gui()->addElement(
+        {"AtiDaq", "brace_bottom_setup", "Brace Bottom Force Sensor"},
+       
+        mc_rtc::gui::NumberInput("cx", [this]() -> double {
+        return ctl.datastore().get<sva::ForceVecd>("ForceShoePlugin::LFForce").force().x(); }),
+
+        mc_rtc::gui::Label("cy", [&ctl, this]() {
+        auto force = ctl.datastore().get<sva::ForceVecd>("ForceShoePlugin::LFForce");
+        return "cy: " + std::to_string(force.couple().y());
+        }),
+        mc_rtc::gui::Label("cz", [&ctl, this]() {
+        auto force = ctl.datastore().get<sva::ForceVecd>("ForceShoePlugin::LFForce");
+        return "cz: " + std::to_string(force.couple().z());
+        }),
+        mc_rtc::gui::Label("fx", [&ctl, this]() {
+        auto force = ctl.datastore().get<sva::ForceVecd>("ForceShoePlugin::LFForce");
+        return "fx: " + std::to_string(force.force().x());
+        }),
+        mc_rtc::gui::Label("fy", [&ctl, this]() {
+        auto force = ctl.datastore().get<sva::ForceVecd>("ForceShoePlugin::LFForce");
+        return "fy: " + std::to_string(force.force().y());
+        }),
+        mc_rtc::gui::Label("fz", [&ctl, this]() {
+        auto force = ctl.datastore().get<sva::ForceVecd>("ForceShoePlugin::LFForce");
+        return "fz: " + std::to_string(force.force().z());
+        })
+);
+
+
+        
+    );
+    
   }
   else
   {
@@ -97,13 +130,16 @@ void ForceShoePlugin::reset(mc_control::MCGlobalController & controller)
                               [&ctl, this]() { return ctl.datastore().get<sva::ForceVecd>("ReplayPlugin::LFForce"); });
     ctl.datastore().make_call("ForceShoePlugin::GetLBForce",
                               [&ctl, this]() { return ctl.datastore().get<sva::ForceVecd>("ReplayPlugin::LBForce"); });
-    ctl.datastore().make_call("ForceShoePlugin::GetRFForce",
-                              [&ctl, this]() { return ctl.datastore().get<sva::ForceVecd>("ReplayPlugin::RFForce"); });
-    ctl.datastore().make_call("ForceShoePlugin::GetRBForce",
-                              [&ctl, this]() { return ctl.datastore().get<sva::ForceVecd>("ReplayPlugin::RBForce"); });
+                        
+   
   }
 
+
+
   mc_rtc::log::info("ForceShoePlugin::reset called");
+  
+ 
+  
 }
 
 void ForceShoePlugin::before(mc_control::MCGlobalController & controller)
@@ -113,9 +149,7 @@ void ForceShoePlugin::before(mc_control::MCGlobalController & controller)
     auto & ctl = controller.controller();
     auto & LF = ctl.datastore().get<sva::ForceVecd>("ForceShoePlugin::LFForce");
     auto & LB = ctl.datastore().get<sva::ForceVecd>("ForceShoePlugin::LBForce");
-    auto & RF = ctl.datastore().get<sva::ForceVecd>("ForceShoePlugin::RFForce");
-    auto & RB = ctl.datastore().get<sva::ForceVecd>("ForceShoePlugin::RBForce");
-
+    
     std::lock_guard<std::mutex> lock(mutex_);
     computeAmpCalMat();
     computeUDiff();
@@ -125,10 +159,7 @@ void ForceShoePlugin::before(mc_control::MCGlobalController & controller)
                         Eigen::Vector3d{LBforcevec[0], LBforcevec[1], LBforcevec[2]});
     LF = sva::ForceVecd(Eigen::Vector3d{LFforcevec[3], LFforcevec[4], LFforcevec[5]},
                         Eigen::Vector3d{LFforcevec[0], LFforcevec[1], LFforcevec[2]});
-    RB = sva::ForceVecd(Eigen::Vector3d{RBforcevec[3], RBforcevec[4], RBforcevec[5]},
-                        Eigen::Vector3d{RBforcevec[0], RBforcevec[1], RBforcevec[2]});
-    RF = sva::ForceVecd(Eigen::Vector3d{RFforcevec[3], RFforcevec[4], RFforcevec[5]},
-                        Eigen::Vector3d{RFforcevec[0], RFforcevec[1], RFforcevec[2]});
+  
   }
 }
 
