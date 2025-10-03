@@ -223,9 +223,9 @@ void ForceShoePlugin::doHardwareConnect(uint32_t baudrate, std::string portName)
     mc_rtc::log::info("Device ID at busId {}: {}", j + 1, id_str);
 
     // Look for a matching configuration and create a ForceShoeSensor instance if found
-    auto found = std::find_if(c_.forceShoeSensors.begin(), c_.forceShoeSensors.end(),
-                              [&id_str](const auto & sensorConfig)
-                              { return sensorConfig.motionTracker.serialNumber == id_str; });
+    auto found =
+        std::find_if(c_.forceShoeSensors.begin(), c_.forceShoeSensors.end(), [&id_str](const auto & sensorConfig)
+                     { return sensorConfig.motionTracker.serialNumber == id_str; });
     if(found != c_.forceShoeSensors.end())
     {
       mc_rtc::log::info("[ForceShoes] Associated sensor with ID {} to configuration:\n{}", id_str,
